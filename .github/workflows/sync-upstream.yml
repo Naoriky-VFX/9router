@@ -1,0 +1,82 @@
+name: Espelhar o original (decolua/9router)
+
+# Este repositório é o fork/espelho do projeto original.
+# O workflow busca decolua/9router e faz fast-forward no master daqui.
+# Se o fork deixar de ser espelho (commits próprios), ele NÃO força nada:
+# abre uma issue para a fusão ser feita à mão.
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 de Brasília
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: espelhar-upstream
+  cancel-in-progress: false
+
+jobs:
+  espelhar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Configurar git
+        run: |
+          git config user.name "Naoriky Sync"
+          git config user.email "naorikycompras@gmail.com"
+
+      - name: Buscar o original
+        run: |
+          git remote add upstream https://github.com/decolua/9router.git || true
+          git fetch upstream master
+
+      - name: Contar novidades
+        id: checar
+        run: |
+          NOVOS=$(git rev-list --count HEAD..upstream/master)
+          echo "novos=$NOVOS" >> "$GITHUB_OUTPUT"
+          echo "Commits novos no original: $NOVOS"
+          if [ "$NOVOS" != "0" ]; then
+            {
+              echo "### Commits novos no original"
+              git log --oneline -20 HEAD..upstream/master | sed 's/^/- /'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Aplicar (fast-forward)
+        id: aplicar
+        if: steps.checar.outputs.novos != '0'
+        run: |
+          if git merge --ff-only upstream/master; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=conflito" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enviar para o master
+        if: steps.aplicar.outputs.status == 'ok'
+        run: |
+          git push origin HEAD:master
+          {
+            echo "### Espelhado ✅"
+            echo "O fork agora está igual ao original."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Avisar que precisa de merge manual
+        if: steps.aplicar.outputs.status == 'conflito'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Espelhamento do original parou (não deu fast-forward)" \
+            --body "O fork deixou de ser espelho do decolua/9router (há commits próprios ou divergência), então nada foi sobrescrito. Para alinhar, faça o merge manualmente." || true
+          exit 1
