@@ -52,14 +52,20 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Aplicar (fast-forward)
+      - name: Aplicar (merge do original)
         id: aplicar
         if: steps.checar.outputs.novos != '0'
         run: |
-          if git merge --ff-only upstream/master; then
+          # Merge normal: este fork tem o commit do próprio workflow, então
+          # fast-forward nunca daria certo. Merge preserva tudo e não força nada.
+          git config merge.ours.driver true || true
+          if git merge --no-edit upstream/master; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else
+            CONFLITOS=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            git merge --abort
             echo "status=conflito" >> "$GITHUB_OUTPUT"
+            echo "conflitos=$CONFLITOS" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Enviar para o master
